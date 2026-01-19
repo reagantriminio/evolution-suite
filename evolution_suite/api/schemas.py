@@ -9,6 +9,27 @@ from pydantic import BaseModel, Field
 # === Agent Schemas ===
 
 
+class UsageMetricsResponse(BaseModel):
+    """Usage metrics response."""
+
+    inputTokens: int = 0
+    outputTokens: int = 0
+    cacheReadTokens: int = 0
+    cacheCreationTokens: int = 0
+    costUsd: float = 0.0
+    requests: int = 0
+
+
+class AgentRelationshipResponse(BaseModel):
+    """Agent relationship response."""
+
+    sourceId: str
+    targetId: str
+    type: str
+    taskDescription: str | None = None
+    createdAt: datetime
+
+
 class AgentResponse(BaseModel):
     """Response for a single agent."""
 
@@ -22,6 +43,12 @@ class AgentResponse(BaseModel):
     toolsUsed: int = 0
     outputLines: int = 0
     error: str | None = None
+    # New fields
+    usage: UsageMetricsResponse | None = None
+    model: str | None = None
+    assignedBy: str | None = None
+    delegatedTo: list[str] = Field(default_factory=list)
+    waitingFor: str | None = None
 
 
 class AgentOutputLine(BaseModel):
@@ -139,3 +166,76 @@ class OrchestratorResponse(BaseModel):
 
     success: bool
     message: str
+
+
+# === Usage Schemas ===
+
+
+class DailyUsageResponse(BaseModel):
+    """Daily usage statistics."""
+
+    date: str
+    metrics: UsageMetricsResponse
+    byAgentType: dict[str, UsageMetricsResponse] = Field(default_factory=dict)
+    byModel: dict[str, UsageMetricsResponse] = Field(default_factory=dict)
+    cycles: int = 0
+    successRate: float = 0.0
+
+
+class UsageHistoryResponse(BaseModel):
+    """Usage history response."""
+
+    today: DailyUsageResponse
+    history: list[DailyUsageResponse]
+    total: UsageMetricsResponse
+
+
+# === State File Schemas ===
+
+
+class StateFileResponse(BaseModel):
+    """Response for a state file."""
+
+    name: str
+    path: str
+    content: str
+    lastModified: datetime | None = None
+    lockedBy: str | None = None
+
+
+class StateFileListResponse(BaseModel):
+    """Response for list of state files."""
+
+    files: list[StateFileResponse]
+
+
+class StateFileUpdateRequest(BaseModel):
+    """Request to update a state file."""
+
+    content: str
+
+
+# === Relationships ===
+
+
+class RelationshipListResponse(BaseModel):
+    """Response for list of relationships."""
+
+    relationships: list[AgentRelationshipResponse]
+
+
+# === Bulk Operations ===
+
+
+class BulkGuidanceRequest(BaseModel):
+    """Request to inject guidance into multiple agents."""
+
+    agentIds: list[str]
+    content: str = Field(..., min_length=1)
+
+
+class BulkActionRequest(BaseModel):
+    """Request for bulk agent actions."""
+
+    agentIds: list[str]
+    action: str = Field(..., pattern="^(pause|resume|kill)$")

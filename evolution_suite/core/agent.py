@@ -39,6 +39,55 @@ class AgentStatus(str, Enum):
 
 
 @dataclass
+class UsageMetrics:
+    """Token usage and cost metrics."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cost_usd: float = 0.0
+    requests: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "inputTokens": self.input_tokens,
+            "outputTokens": self.output_tokens,
+            "cacheReadTokens": self.cache_read_tokens,
+            "cacheCreationTokens": self.cache_creation_tokens,
+            "costUsd": self.cost_usd,
+            "requests": self.requests,
+        }
+
+    def add(self, other: "UsageMetrics") -> None:
+        """Add another UsageMetrics to this one."""
+        self.input_tokens += other.input_tokens
+        self.output_tokens += other.output_tokens
+        self.cache_read_tokens += other.cache_read_tokens
+        self.cache_creation_tokens += other.cache_creation_tokens
+        self.cost_usd += other.cost_usd
+        self.requests += other.requests
+
+
+# Pricing per million tokens (as of 2025)
+MODEL_PRICING = {
+    "claude-opus-4-5-20251101": {"input": 15.0, "output": 75.0},
+    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
+    "claude-haiku-3-5-20241022": {"input": 0.80, "output": 4.0},
+    # Fallback for unknown models
+    "default": {"input": 3.0, "output": 15.0},
+}
+
+
+def calculate_cost(input_tokens: int, output_tokens: int, model: str = "default") -> float:
+    """Calculate cost in USD for given token counts."""
+    pricing = MODEL_PRICING.get(model, MODEL_PRICING["default"])
+    input_cost = (input_tokens / 1_000_000) * pricing["input"]
+    output_cost = (output_tokens / 1_000_000) * pricing["output"]
+    return round(input_cost + output_cost, 6)
+
+
+@dataclass
 class OutputLine:
     """A single line of agent output."""
 
@@ -83,6 +132,7 @@ class Agent:
         on_output: Callable[[OutputLine], None] | None = None,
         on_tool_use: Callable[[ToolUse], None] | None = None,
         on_status_change: Callable[[AgentStatus], None] | None = None,
+        on_usage: Callable[["UsageMetrics"], None] | None = None,
     ):
         self.id = agent_id or f"{agent_type.value}-{uuid.uuid4().hex[:8]}"
         self.type = agent_type
@@ -97,10 +147,20 @@ class Agent:
         self.finished_at: datetime | None = None
         self.error: str | None = None
 
+        # Usage tracking
+        self.usage_metrics = UsageMetrics()
+        self.model: str = "default"
+
+        # Relationship tracking
+        self.assigned_by: str | None = None  # ID of agent that delegated to this one
+        self.delegated_to: list[str] = []  # IDs of agents this one assigned work to
+        self.waiting_for: str | None = None  # ID of agent blocking this one
+
         # Callbacks
         self._on_output = on_output
         self._on_tool_use = on_tool_use
         self._on_status_change = on_status_change
+        self._on_usage = on_usage
 
         # Control flags
         self._should_stop = False
@@ -133,6 +193,33 @@ class Agent:
                 filename = Path(file_path).name
                 if filename not in self.files_modified:
                     self.files_modified.append(filename)
+
+    def _update_usage(self, usage_data: dict[str, Any]) -> None:
+        """Update usage metrics from Claude API response."""
+        input_tokens = usage_data.get("input_tokens", 0)
+        output_tokens = usage_data.get("output_tokens", 0)
+        cache_read = usage_data.get("cache_read_input_tokens", 0)
+        cache_creation = usage_data.get("cache_creation_input_tokens", 0)
+
+        # Calculate cost
+        cost = calculate_cost(input_tokens, output_tokens, self.model)
+
+        # Create metrics for this request
+        request_metrics = UsageMetrics(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
+            cost_usd=cost,
+            requests=1,
+        )
+
+        # Add to cumulative metrics
+        self.usage_metrics.add(request_metrics)
+
+        # Notify callback
+        if self._on_usage:
+            self._on_usage(request_metrics)
 
     def get_guidance_file(self) -> Path:
         """Get path to this agent's guidance file."""
@@ -358,6 +445,16 @@ class Agent:
                     line_type="result",
                 ))
 
+            # Capture usage metrics from result
+            usage = event.get("usage", {})
+            if usage:
+                self._update_usage(usage)
+
+            # Capture model info
+            model = event.get("model", "")
+            if model:
+                self.model = model
+
     def pause(self) -> None:
         """Pause the agent."""
         self._paused = True
@@ -422,4 +519,11 @@ class Agent:
             "toolsUsed": len(self.tools_used),
             "outputLines": len(self.output_buffer),
             "error": self.error,
+            # Usage metrics
+            "usage": self.usage_metrics.to_dict(),
+            "model": self.model,
+            # Relationship tracking
+            "assignedBy": self.assigned_by,
+            "delegatedTo": self.delegated_to,
+            "waitingFor": self.waiting_for,
         }

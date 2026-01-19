@@ -10,17 +10,27 @@ from fastapi import APIRouter, HTTPException
 
 from evolution_suite.api.schemas import (
     AgentOutputResponse,
+    AgentRelationshipResponse,
     AgentResponse,
+    BulkActionRequest,
+    BulkGuidanceRequest,
     CycleListResponse,
     CycleResponse,
+    DailyUsageResponse,
     GuidanceRequest,
     OrchestratorResponse,
     PromptListResponse,
     PromptResponse,
     PromptUpdateRequest,
+    RelationshipListResponse,
     SpawnAgentRequest,
     StartOrchestratorRequest,
+    StateFileListResponse,
+    StateFileResponse,
+    StateFileUpdateRequest,
     StatusResponse,
+    UsageHistoryResponse,
+    UsageMetricsResponse,
 )
 from evolution_suite.core.agent import AgentType
 
@@ -286,6 +296,167 @@ def create_router(
         return OrchestratorResponse(
             success=True,
             message="Orchestrator force stopped",
+        )
+
+    # === Usage ===
+
+    @router.get("/usage", response_model=UsageHistoryResponse)
+    async def get_usage(days: int = 7):
+        """Get usage statistics."""
+        today_usage = orchestrator.agent_manager.get_today_usage()
+        history = orchestrator.agent_manager.get_usage_history(days)
+
+        return UsageHistoryResponse(
+            today=DailyUsageResponse(**today_usage.to_dict()),
+            history=[DailyUsageResponse(**d.to_dict()) for d in history],
+            total=UsageMetricsResponse(**orchestrator.agent_manager.total_usage.to_dict()),
+        )
+
+    @router.get("/usage/today", response_model=DailyUsageResponse)
+    async def get_today_usage():
+        """Get today's usage statistics."""
+        usage = orchestrator.agent_manager.get_today_usage()
+        return DailyUsageResponse(**usage.to_dict())
+
+    # === State Files ===
+
+    @router.get("/state-files", response_model=StateFileListResponse)
+    async def list_state_files():
+        """List all state files in the evolution directory."""
+        state_dir = config.get_state_dir()
+        files = []
+
+        # Main state files
+        for pattern in ["*.md", "*.json", ".agent-state/*.json", ".guidance/*.md"]:
+            for path in state_dir.glob(pattern):
+                if path.is_file():
+                    try:
+                        content = path.read_text()
+                        mtime = datetime.fromtimestamp(path.stat().st_mtime)
+                        files.append(StateFileResponse(
+                            name=path.name,
+                            path=str(path.relative_to(state_dir)),
+                            content=content,
+                            lastModified=mtime,
+                            lockedBy=None,  # TODO: Parse lock info if applicable
+                        ))
+                    except Exception:
+                        continue
+
+        return StateFileListResponse(files=files)
+
+    @router.get("/state-files/{file_path:path}", response_model=StateFileResponse)
+    async def get_state_file(file_path: str):
+        """Get a specific state file."""
+        state_dir = config.get_state_dir()
+        full_path = state_dir / file_path
+
+        if not full_path.exists() or not full_path.is_file():
+            raise HTTPException(status_code=404, detail="State file not found")
+
+        # Security check - ensure path is within state dir
+        try:
+            full_path.resolve().relative_to(state_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        content = full_path.read_text()
+        mtime = datetime.fromtimestamp(full_path.stat().st_mtime)
+
+        return StateFileResponse(
+            name=full_path.name,
+            path=file_path,
+            content=content,
+            lastModified=mtime,
+            lockedBy=None,
+        )
+
+    @router.put("/state-files/{file_path:path}", response_model=StateFileResponse)
+    async def update_state_file(file_path: str, request: StateFileUpdateRequest):
+        """Update a state file."""
+        state_dir = config.get_state_dir()
+        full_path = state_dir / file_path
+
+        # Security check
+        try:
+            full_path.resolve().relative_to(state_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Create parent directories if needed
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+
+        full_path.write_text(request.content)
+
+        # Broadcast update
+        await ws_manager.broadcast({
+            "type": "state_file_changed",
+            "file": {
+                "name": full_path.name,
+                "path": file_path,
+                "lastModified": datetime.now().isoformat(),
+            },
+        })
+
+        return StateFileResponse(
+            name=full_path.name,
+            path=file_path,
+            content=request.content,
+            lastModified=datetime.now(),
+            lockedBy=None,
+        )
+
+    # === Relationships ===
+
+    @router.get("/relationships", response_model=RelationshipListResponse)
+    async def list_relationships(active_only: bool = True):
+        """List agent relationships."""
+        if active_only:
+            relationships = orchestrator.agent_manager.get_active_relationships()
+        else:
+            relationships = orchestrator.agent_manager.relationships
+
+        return RelationshipListResponse(
+            relationships=[AgentRelationshipResponse(**r.to_dict()) for r in relationships]
+        )
+
+    # === Bulk Operations ===
+
+    @router.post("/agents/bulk/guidance", response_model=OrchestratorResponse)
+    async def bulk_inject_guidance(request: BulkGuidanceRequest):
+        """Inject guidance into multiple agents."""
+        success_count = 0
+        for agent_id in request.agentIds:
+            try:
+                await orchestrator.agent_manager.inject_guidance(agent_id, request.content)
+                success_count += 1
+            except ValueError:
+                continue
+
+        return OrchestratorResponse(
+            success=success_count > 0,
+            message=f"Guidance injected into {success_count}/{len(request.agentIds)} agents",
+        )
+
+    @router.post("/agents/bulk/action", response_model=OrchestratorResponse)
+    async def bulk_agent_action(request: BulkActionRequest):
+        """Perform an action on multiple agents."""
+        success_count = 0
+        for agent_id in request.agentIds:
+            try:
+                if request.action == "pause":
+                    await orchestrator.agent_manager.pause_agent(agent_id)
+                elif request.action == "resume":
+                    await orchestrator.agent_manager.resume_agent(agent_id)
+                elif request.action == "kill":
+                    await orchestrator.agent_manager.kill_agent(agent_id)
+                success_count += 1
+            except ValueError:
+                continue
+
+        return OrchestratorResponse(
+            success=success_count > 0,
+            message=f"{request.action.capitalize()} executed on {success_count}/{len(request.agentIds)} agents",
         )
 
     return router
