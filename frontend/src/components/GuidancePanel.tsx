@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, ChevronDown, FileText, Save, Plus } from 'lucide-react';
+import { Send, ChevronDown, FileText, Save } from 'lucide-react';
 import { useAgentStore } from '@/stores/agentStore';
 import * as api from '@/lib/api';
 import clsx from 'clsx';

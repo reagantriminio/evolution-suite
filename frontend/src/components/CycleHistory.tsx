@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, X, Clock, ChevronRight } from 'lucide-react';
+import { Check, X, Clock } from 'lucide-react';
 import { useAgentStore } from '@/stores/agentStore';
 import clsx from 'clsx';
 import type { Cycle, TaskType } from '@/lib/types';
@@ -59,14 +59,6 @@ function CycleCard({ cycle }: { cycle: Cycle }) {
     return `${mins}m ${secs}s`;
   };
 
-  const formatTime = (seconds: number) => {
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
-  };
-
-  // Calculate time ago (mock - in real app would use actual timestamp)
   const timeAgo = formatDuration(cycle.durationSeconds);
 
   return (
