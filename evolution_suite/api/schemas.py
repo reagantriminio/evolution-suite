@@ -37,6 +37,7 @@ class AgentResponse(BaseModel):
     type: str
     status: str
     currentTask: str | None = None
+    goal: str | None = None
     startedAt: datetime | None = None
     finishedAt: datetime | None = None
     filesModified: list[str] = Field(default_factory=list)

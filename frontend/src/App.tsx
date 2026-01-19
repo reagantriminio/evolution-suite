@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Toaster } from 'react-hot-toast';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useInitialData } from '@/hooks/useAgents';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { Layout } from '@/components/Layout';
+import { MasterDirective } from '@/components/MasterDirective';
 import { AgentPool } from '@/components/AgentPool';
 import { OutputPanel } from '@/components/OutputPanel';
 import { GuidancePanel } from '@/components/GuidancePanel';
@@ -10,6 +13,7 @@ import { AgentNetworkGraph } from '@/components/AgentNetworkGraph';
 import { SlideOutPanel } from '@/components/SlideOutPanel';
 import { BulkActionsToolbar } from '@/components/BulkActionsToolbar';
 import { UsageDashboard } from '@/components/UsageDashboard';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { Network, LayoutGrid, BarChart3 } from 'lucide-react';
 import type { StateFile, AgentRelationship, Prompt } from '@/lib/types';
 import * as api from '@/lib/api';
@@ -23,8 +27,8 @@ function App() {
   // Fetch initial data
   useInitialData();
 
-  // View state
-  const [viewMode, setViewMode] = useState<ViewMode>('graph');
+  // View state - persisted across sessions, default to classic
+  const [viewMode, setViewMode] = usePersistedState<ViewMode>('view-mode', 'classic');
 
   // Graph state
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -121,6 +125,35 @@ function App() {
 
   return (
     <Layout>
+      {/* Toast Notifications */}
+      <Toaster
+        position="bottom-right"
+        toastOptions={{
+          duration: 3000,
+          style: {
+            background: '#27272a',
+            color: '#fafafa',
+            border: '1px solid #3f3f46',
+          },
+          success: {
+            iconTheme: {
+              primary: '#22c55e',
+              secondary: '#27272a',
+            },
+          },
+          error: {
+            iconTheme: {
+              primary: '#ef4444',
+              secondary: '#27272a',
+            },
+            duration: 4000,
+          },
+        }}
+      />
+
+      {/* Master Directive */}
+      <MasterDirective />
+
       {/* View Mode Tabs */}
       <div className="flex items-center gap-2 mb-4">
         <div className="flex items-center bg-zinc-900 rounded-lg p-1 border border-zinc-800">
@@ -162,25 +195,33 @@ function App() {
 
       {/* Classic View */}
       {viewMode === 'classic' && (
-        <div className="flex flex-col h-full gap-4">
+        <div className="flex flex-col gap-4" style={{ height: 'calc(100vh - 140px)' }}>
           {/* Top section: Agent Pool */}
           <section className="flex-shrink-0">
-            <AgentPool />
+            <ErrorBoundary>
+              <AgentPool />
+            </ErrorBoundary>
           </section>
 
           {/* Middle section: Output + Guidance */}
           <section className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-0">
             <div className="lg:col-span-2 min-h-0">
-              <OutputPanel />
+              <ErrorBoundary>
+                <OutputPanel />
+              </ErrorBoundary>
             </div>
             <div className="min-h-0">
-              <GuidancePanel />
+              <ErrorBoundary>
+                <GuidancePanel />
+              </ErrorBoundary>
             </div>
           </section>
 
           {/* Bottom section: Cycle History */}
           <section className="flex-shrink-0 h-48">
-            <CycleHistory />
+            <ErrorBoundary>
+              <CycleHistory />
+            </ErrorBoundary>
           </section>
         </div>
       )}
@@ -190,25 +231,31 @@ function App() {
         <div className="flex flex-col h-[calc(100vh-180px)] gap-4">
           {/* Graph */}
           <section className="flex-1 min-h-0">
-            <AgentNetworkGraph
-              onNodeSelect={handleNodeSelect}
-              selectedNodes={selectedNodes}
-              onSelectionChange={handleSelectionChange}
-              stateFiles={stateFiles}
-              relationships={relationships}
-            />
+            <ErrorBoundary>
+              <AgentNetworkGraph
+                onNodeSelect={handleNodeSelect}
+                selectedNodes={selectedNodes}
+                onSelectionChange={handleSelectionChange}
+                stateFiles={stateFiles}
+                relationships={relationships}
+              />
+            </ErrorBoundary>
           </section>
 
           {/* Bottom section: Cycle History */}
           <section className="flex-shrink-0 h-40">
-            <CycleHistory />
+            <ErrorBoundary>
+              <CycleHistory />
+            </ErrorBoundary>
           </section>
         </div>
       )}
 
       {/* Usage View */}
       {viewMode === 'usage' && (
-        <UsageDashboard isVisible={viewMode === 'usage'} />
+        <ErrorBoundary>
+          <UsageDashboard isVisible={viewMode === 'usage'} />
+        </ErrorBoundary>
       )}
 
       {/* Bulk Actions Toolbar */}

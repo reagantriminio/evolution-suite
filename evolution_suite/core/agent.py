@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 import time
 import uuid
 from collections import deque
@@ -138,11 +137,12 @@ class Agent:
         self.type = agent_type
         self.config = config
         self.status = AgentStatus.IDLE
-        self.process: subprocess.Popen | None = None
+        self.process: asyncio.subprocess.Process | None = None
         self.output_buffer: deque[OutputLine] = deque(maxlen=10000)
         self.tools_used: list[ToolUse] = []
         self.files_modified: list[str] = []
         self.current_task: str | None = None
+        self.goal: str | None = None  # The overarching objective for this agent
         self.started_at: datetime | None = None
         self.finished_at: datetime | None = None
         self.error: str | None = None
@@ -240,10 +240,27 @@ class Agent:
             guidance_file.unlink()
 
     def inject_guidance(self, content: str) -> None:
-        """Write guidance to be picked up by the agent."""
+        """Store guidance for the agent's next continuation.
+
+        With -p mode, we can't inject into a running process.
+        The guidance is stored and will be included when the agent is continued.
+        """
         guidance_dir = self.config.get_guidance_dir()
         guidance_dir.mkdir(parents=True, exist_ok=True)
-        self.get_guidance_file().write_text(content)
+
+        # Append to existing guidance if any
+        guidance_file = self.get_guidance_file()
+        existing = guidance_file.read_text() if guidance_file.exists() else ""
+        if existing:
+            content = existing + "\n\n---\n\n" + content
+        guidance_file.write_text(content)
+
+        self._add_output(OutputLine(
+            timestamp=datetime.now(),
+            content=f"[Guidance queued for next continuation: {content[:100]}...]",
+            line_type="text",
+            metadata={"queued_guidance": True},
+        ))
 
     async def start(self, prompt: str) -> None:
         """Start the agent with the given prompt."""
@@ -260,26 +277,48 @@ class Agent:
         self.tools_used = []
         self.files_modified = []
 
+        # Include any pending guidance in the prompt
+        pending_guidance = self.read_guidance()
+        if pending_guidance:
+            prompt = prompt + "\n\n## Additional Context/Guidance\n\n" + pending_guidance
+            self.clear_guidance()
+
+        # Set goal from prompt (first line or truncated)
+        first_line = prompt.strip().split('\n')[0]
+        goal_value = first_line[:200] if len(first_line) > 200 else first_line
+        self.goal = goal_value
+        self.current_task = goal_value
+
         # Get agent-specific timeout
         agent_config = getattr(self.config.agents, self.type.value)
         timeout_minutes = agent_config.timeout_minutes
 
         try:
-            cmd = [
+            # Build command arguments
+            cmd_args = [
                 "claude",
                 "--dangerously-skip-permissions",
                 "--verbose",
-                "--output-format",
-                "stream-json",
-                "-p",
-                prompt,
+                "--output-format", "stream-json",
+                "--permission-mode", "bypassPermissions",  # Run fully autonomously
+                "-p",  # Print mode for non-interactive output
             ]
 
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+            # For coordinators, disable the Task tool so they use HTTP API instead
+            if self.type == AgentType.COORDINATOR:
+                # Disable Task tool - coordinator should use curl to spawn real agents via HTTP API
+                cmd_args.extend([
+                    "--tools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch",
+                ])
+
+            # Add prompt as argument
+            cmd_args.append(prompt)
+
+            # Use asyncio subprocess for proper async handling
+            self.process = await asyncio.create_subprocess_exec(
+                *cmd_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=self.config.project_root,
             )
 
@@ -303,11 +342,12 @@ class Agent:
                 self._set_status(AgentStatus.STOPPED)
 
     async def _stream_output(self, timeout_seconds: float) -> None:
-        """Stream output from the subprocess."""
+        """Stream output from the subprocess using chunk-based reading."""
         if not self.process or not self.process.stdout:
             return
 
         start_time = time.time()
+        buffer = b""
 
         while True:
             # Check for stop request
@@ -330,26 +370,30 @@ class Agent:
                 self._set_status(AgentStatus.FAILED)
                 break
 
-            # Check if process finished
-            retcode = self.process.poll()
-            if retcode is not None:
-                # Read remaining output
-                remaining = self.process.stdout.read()
-                if remaining:
-                    await self._process_output(remaining)
-                break
-
-            # Read available output (non-blocking via asyncio)
+            # Read chunks and process complete lines
             try:
-                line = await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(
-                        None, self.process.stdout.readline
-                    ),
+                chunk = await asyncio.wait_for(
+                    self.process.stdout.read(65536),  # Read up to 64KB at a time
                     timeout=0.5,
                 )
-                if line:
-                    await self._process_output(line)
+                if chunk:
+                    buffer += chunk
+                    # Process complete lines
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        await self._process_output(line.decode("utf-8", errors="replace"))
+                elif self.process.returncode is not None:
+                    # Process finished - handle remaining buffer
+                    if buffer:
+                        await self._process_output(buffer.decode("utf-8", errors="replace"))
+                    break
             except asyncio.TimeoutError:
+                # Check if process is still running
+                if self.process.returncode is not None:
+                    # Process remaining buffer
+                    if buffer:
+                        await self._process_output(buffer.decode("utf-8", errors="replace"))
+                    break
                 continue
 
     async def _process_output(self, output: str) -> None:
@@ -372,6 +416,13 @@ class Agent:
     async def _handle_event(self, event: dict[str, Any]) -> None:
         """Handle a parsed JSON event from Claude."""
         event_type = event.get("type", "")
+
+        # Capture model from system init event
+        if event_type == "system" and event.get("subtype") == "init":
+            model = event.get("model", "")
+            if model:
+                self.model = model
+            return
 
         if event_type == "assistant":
             message = event.get("message", {})
@@ -477,9 +528,12 @@ class Agent:
         if self.process:
             try:
                 self.process.terminate()
-                await asyncio.sleep(2)
-                if self.process.poll() is None:
+                # Wait up to 2 seconds for graceful termination
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
                     self.process.kill()
+                    await self.process.wait()
             except Exception:
                 pass
 
@@ -492,6 +546,7 @@ class Agent:
         if self.process:
             try:
                 self.process.kill()
+                await self.process.wait()
             except Exception:
                 pass
 
@@ -508,11 +563,12 @@ class Agent:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert agent state to dictionary."""
-        return {
+        result = {
             "id": self.id,
             "type": self.type.value,
             "status": self.status.value,
             "currentTask": self.current_task,
+            "goal": self.goal,
             "startedAt": self.started_at.isoformat() if self.started_at else None,
             "finishedAt": self.finished_at.isoformat() if self.finished_at else None,
             "filesModified": self.files_modified,
@@ -527,3 +583,4 @@ class Agent:
             "delegatedTo": self.delegated_to,
             "waitingFor": self.waiting_for,
         }
+        return result

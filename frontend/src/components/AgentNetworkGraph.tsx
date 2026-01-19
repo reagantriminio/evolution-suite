@@ -1,11 +1,10 @@
 import { useCallback, useMemo } from 'react';
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
-  useNodesState,
-  useEdgesState,
   Node,
   Edge,
   Position,
@@ -20,16 +19,16 @@ import { FileText, Users } from 'lucide-react';
 import { useAgentStore } from '@/stores/agentStore';
 import type { Agent, AgentType, StateFile, AgentRelationship } from '@/lib/types';
 
-// Lane configuration
+// Lane configuration - wider spacing for larger nodes
 const LANES = {
-  coordinator: { x: 100, label: 'Coordinators', color: '#6366f1' },
-  stateFiles: { x: 350, label: 'State Files', color: '#8b5cf6' },
-  worker: { x: 600, label: 'Workers', color: '#22c55e' },
-  evaluator: { x: 850, label: 'Evaluators', color: '#f59e0b' },
+  coordinator: { x: 50, label: 'Coordinators', color: '#6366f1' },
+  stateFiles: { x: 380, label: 'State Files', color: '#8b5cf6' },
+  worker: { x: 580, label: 'Workers', color: '#22c55e' },
+  evaluator: { x: 910, label: 'Evaluators', color: '#f59e0b' },
 };
 
-const NODE_HEIGHT = 120;
-const NODE_SPACING = 20;
+const NODE_HEIGHT = 180;  // Taller nodes to accommodate goal
+const NODE_SPACING = 30;
 
 // Status colors
 const STATUS_COLORS: Record<string, string> = {
@@ -42,47 +41,87 @@ const STATUS_COLORS: Record<string, string> = {
   failed: '#ef4444',
 };
 
+// Type colors for borders
+const TYPE_COLORS: Record<string, string> = {
+  coordinator: '#6366f1',
+  worker: '#22c55e',
+  evaluator: '#f59e0b',
+};
+
 // Custom Agent Node
 function AgentNode({ data, selected }: NodeProps) {
   const agent = data.agent as Agent;
   const statusColor = STATUS_COLORS[agent.status] || '#6b7280';
+  const typeColor = TYPE_COLORS[agent.type] || '#6b7280';
 
   return (
     <div
       className={`
-        bg-zinc-900 border rounded-lg p-3 min-w-[180px] transition-all
-        ${selected ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-zinc-700'}
-        hover:border-zinc-600
+        bg-zinc-900 border-2 rounded-lg p-3 min-w-[220px] max-w-[280px] transition-all shadow-lg
+        ${selected ? 'ring-2 ring-blue-500/40' : ''}
+        hover:shadow-xl
       `}
+      style={{ borderColor: typeColor }}
     >
-      <Handle type="target" position={Position.Left} className="!bg-zinc-600" />
-      <Handle type="source" position={Position.Right} className="!bg-zinc-600" />
+      <Handle type="target" position={Position.Left} className="!bg-zinc-400 !w-3 !h-3" />
+      <Handle type="source" position={Position.Right} className="!bg-zinc-400 !w-3 !h-3" />
 
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <motion.div
-            className="w-2.5 h-2.5 rounded-full"
+            className="w-3 h-3 rounded-full"
             style={{ backgroundColor: statusColor }}
-            animate={agent.status === 'running' ? { scale: [1, 1.2, 1] } : {}}
+            animate={agent.status === 'running' ? { scale: [1, 1.3, 1] } : {}}
             transition={{ repeat: Infinity, duration: 1 }}
           />
-          <span className="text-xs font-medium text-zinc-300 uppercase">
+          <span
+            className="text-sm font-bold uppercase"
+            style={{ color: typeColor }}
+          >
             {agent.type}
           </span>
         </div>
-        <span className="text-xs text-zinc-500 font-mono">{agent.id.split('-')[1]}</span>
+        <span className="text-xs text-zinc-400 font-mono bg-zinc-800 px-1.5 py-0.5 rounded">
+          {agent.id.split('-')[1]}
+        </span>
       </div>
 
-      {/* Task */}
-      <div className="text-xs text-zinc-400 truncate mb-2" title={agent.currentTask || ''}>
-        {agent.currentTask || 'Idle'}
+      {/* Goal - prominently displayed */}
+      {agent.goal && (
+        <div
+          className="text-sm text-zinc-200 mb-2 p-2 bg-zinc-800/70 rounded border-l-2"
+          style={{ borderLeftColor: typeColor }}
+          title={agent.goal}
+        >
+          <div className="text-[10px] uppercase text-zinc-500 mb-0.5 font-medium">Goal</div>
+          <div className="line-clamp-2">{agent.goal}</div>
+        </div>
+      )}
+
+      {/* Status badge */}
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="text-xs px-2 py-0.5 rounded-full font-medium"
+          style={{
+            backgroundColor: statusColor + '20',
+            color: statusColor
+          }}
+        >
+          {agent.status}
+        </span>
+        {agent.error && (
+          <span className="text-xs text-red-400 truncate" title={agent.error}>
+            Error
+          </span>
+        )}
       </div>
 
       {/* Stats */}
-      <div className="flex items-center gap-3 text-xs text-zinc-500">
+      <div className="flex items-center gap-3 text-xs text-zinc-400">
         <span title="Tools used">{agent.toolsUsed} tools</span>
         <span title="Files modified">{agent.filesModified.length} files</span>
+        <span title="Output lines">{agent.outputLines} lines</span>
       </div>
 
       {/* Usage cost if available */}
@@ -95,7 +134,7 @@ function AgentNode({ data, selected }: NodeProps) {
       {/* Waiting indicator */}
       {agent.waitingFor && (
         <div className="mt-2 text-xs text-orange-400 flex items-center gap-1">
-          <span className="animate-pulse">Waiting...</span>
+          <span className="animate-pulse">⏳ Waiting...</span>
         </div>
       )}
     </div>
@@ -163,7 +202,8 @@ interface AgentNetworkGraphProps {
   relationships: AgentRelationship[];
 }
 
-export function AgentNetworkGraph({
+// Inner component that uses React Flow hooks (must be inside ReactFlowProvider)
+function FlowGraph({
   onNodeSelect,
   selectedNodes,
   onSelectionChange,
@@ -281,18 +321,6 @@ export function AgentNetworkGraph({
     return result;
   }, [relationships, agentsList, stateFiles]);
 
-  const [nodesState, setNodes, onNodesChange] = useNodesState(nodes);
-  const [edgesState, setEdges, onEdgesChange] = useEdgesState(edges);
-
-  // Update nodes when agents change
-  useMemo(() => {
-    setNodes(nodes);
-  }, [nodes, setNodes]);
-
-  useMemo(() => {
-    setEdges(edges);
-  }, [edges, setEdges]);
-
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       const nodeType = node.type === 'stateFile' ? 'stateFile' : 'agent';
@@ -320,31 +348,31 @@ export function AgentNetworkGraph({
   }), [agentsList, stateFiles]);
 
   return (
-    <div className="h-full w-full relative bg-zinc-950 rounded-lg overflow-hidden">
-      {/* Lane Headers */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex pointer-events-none">
-        <div style={{ marginLeft: LANES.coordinator.x - 30 }}>
+    <div className="h-full w-full relative bg-zinc-950 rounded-lg overflow-hidden" style={{ minHeight: '400px' }}>
+      {/* Lane Headers - positioned absolutely */}
+      <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none">
+        <div className="absolute" style={{ left: LANES.coordinator.x + 60 }}>
           <LaneHeader label="Coordinators" color={LANES.coordinator.color} count={counts.coordinator} />
         </div>
-        <div style={{ marginLeft: LANES.stateFiles.x - LANES.coordinator.x - 70 }}>
+        <div className="absolute" style={{ left: LANES.stateFiles.x + 20 }}>
           <LaneHeader label="State Files" color={LANES.stateFiles.color} count={counts.stateFiles} />
         </div>
-        <div style={{ marginLeft: LANES.worker.x - LANES.stateFiles.x - 70 }}>
+        <div className="absolute" style={{ left: LANES.worker.x + 80 }}>
           <LaneHeader label="Workers" color={LANES.worker.color} count={counts.worker} />
         </div>
-        <div style={{ marginLeft: LANES.evaluator.x - LANES.worker.x - 50 }}>
+        <div className="absolute" style={{ left: LANES.evaluator.x + 60 }}>
           <LaneHeader label="Evaluators" color={LANES.evaluator.color} count={counts.evaluator} />
         </div>
       </div>
 
       {/* Lane Dividers */}
-      <svg className="absolute inset-0 pointer-events-none z-0">
-        {[LANES.coordinator.x + 90, LANES.stateFiles.x + 70, LANES.worker.x + 90].map((x, i) => (
+      <svg className="absolute inset-0 pointer-events-none z-0" width="100%" height="100%">
+        {[LANES.stateFiles.x - 30, LANES.worker.x - 30, LANES.evaluator.x - 30].map((x, i) => (
           <line
             key={i}
-            x1={x + 50}
+            x1={x}
             y1={0}
-            x2={x + 50}
+            x2={x}
             y2="100%"
             stroke="#27272a"
             strokeDasharray="4 4"
@@ -353,19 +381,22 @@ export function AgentNetworkGraph({
       </svg>
 
       <ReactFlow
-        nodes={nodesState}
-        edges={edgesState}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        nodes={nodes}
+        edges={edges}
         onNodeClick={onNodeClick}
         onSelectionChange={onSelectionChangeHandler}
         nodeTypes={nodeTypes}
         fitView
+        fitViewOptions={{ padding: 0.2 }}
         selectionOnDrag
         selectNodesOnDrag
         selectionMode={SelectionMode.Partial}
         className="bg-zinc-950"
         proOptions={{ hideAttribution: true }}
+        defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+        nodesDraggable={true}
+        nodesConnectable={false}
+        elementsSelectable={true}
       >
         <Background color="#27272a" gap={20} />
         <Controls className="!bg-zinc-800 !border-zinc-700 !rounded-lg [&>button]:!bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!text-zinc-400 [&>button:hover]:!bg-zinc-700" />
@@ -381,7 +412,7 @@ export function AgentNetworkGraph({
 
       {/* Empty State */}
       {agentsList.length === 0 && stateFiles.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="text-center text-zinc-500">
             <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p className="text-sm">No agents or state files</p>
@@ -391,7 +422,7 @@ export function AgentNetworkGraph({
       )}
 
       {/* Legend */}
-      <div className="absolute bottom-4 left-4 bg-zinc-900/90 border border-zinc-700 rounded-lg p-3 text-xs">
+      <div className="absolute bottom-4 left-4 bg-zinc-900/90 border border-zinc-700 rounded-lg p-3 text-xs z-10">
         <div className="font-medium text-zinc-300 mb-2">Edge Types</div>
         <div className="space-y-1">
           <div className="flex items-center gap-2">
@@ -413,5 +444,14 @@ export function AgentNetworkGraph({
         </div>
       </div>
     </div>
+  );
+}
+
+// Outer component that provides the ReactFlowProvider context
+export function AgentNetworkGraph(props: AgentNetworkGraphProps) {
+  return (
+    <ReactFlowProvider>
+      <FlowGraph {...props} />
+    </ReactFlowProvider>
   );
 }

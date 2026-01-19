@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, ChevronDown, FileText, Save } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useAgentStore } from '@/stores/agentStore';
 import * as api from '@/lib/api';
 import clsx from 'clsx';
@@ -28,8 +29,10 @@ export function GuidancePanel() {
     try {
       await api.injectGuidance(effectiveTarget, guidance);
       setGuidance('');
+      toast.success('Guidance injected');
     } catch (error) {
       console.error('Failed to inject:', error);
+      toast.error('Failed to inject guidance');
     }
   };
 
@@ -51,8 +54,10 @@ export function GuidancePanel() {
       await api.updatePrompt(editingPrompt, promptContent);
       setEditingPrompt(null);
       setPromptContent('');
+      toast.success('Prompt saved');
     } catch (error) {
       console.error('Failed to save prompt:', error);
+      toast.error('Failed to save prompt');
     }
   };
 

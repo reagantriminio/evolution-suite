@@ -7,30 +7,56 @@ const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${win
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { setConnected, handleEvent } = useAgentStore();
+  const storeRef = useRef(useAgentStore.getState());
+  // Track if we're intentionally closing (cleanup) vs unexpected disconnect
+  const isCleaningUpRef = useRef(false);
+
+  // Keep storeRef current without causing re-renders
+  useEffect(() => {
+    return useAgentStore.subscribe((state) => {
+      storeRef.current = state;
+    });
+  }, []);
 
   const connect = useCallback(() => {
+    // Don't connect if we're in cleanup phase
+    if (isCleaningUpRef.current) {
+      return;
+    }
+
+    // Clean up any pending reconnect
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
     // Clean up existing connection
     if (wsRef.current) {
-      wsRef.current.close();
+      // Mark as intentional close to prevent reconnect loop
+      const oldWs = wsRef.current;
+      wsRef.current = null;
+      oldWs.onclose = null; // Remove handler before closing
+      oldWs.close();
     }
 
     const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
       console.log('[WS] Connected');
-      setConnected(true);
+      storeRef.current.setConnected(true);
     };
 
     ws.onclose = () => {
       console.log('[WS] Disconnected');
-      setConnected(false);
+      storeRef.current.setConnected(false);
 
-      // Reconnect after delay
-      reconnectTimeoutRef.current = setTimeout(() => {
-        console.log('[WS] Reconnecting...');
-        connect();
-      }, 2000);
+      // Only reconnect if this wasn't an intentional cleanup
+      if (!isCleaningUpRef.current && wsRef.current === ws) {
+        reconnectTimeoutRef.current = setTimeout(() => {
+          console.log('[WS] Reconnecting...');
+          connect();
+        }, 2000);
+      }
     };
 
     ws.onerror = (error) => {
@@ -39,15 +65,20 @@ export function useWebSocket() {
 
     ws.onmessage = (event) => {
       try {
-        const data: WebSocketEvent = JSON.parse(event.data);
-        handleEvent(data);
+        const data = JSON.parse(event.data);
+        // Respond to ping with pong for keepalive
+        if (data.type === 'ping') {
+          ws.send(JSON.stringify({ type: 'pong' }));
+          return;
+        }
+        storeRef.current.handleEvent(data as WebSocketEvent);
       } catch (error) {
         console.error('[WS] Failed to parse message:', error);
       }
     };
 
     wsRef.current = ws;
-  }, [setConnected, handleEvent]);
+  }, []);
 
   const send = useCallback((data: Record<string, unknown>) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -64,14 +95,21 @@ export function useWebSocket() {
   }, [send]);
 
   useEffect(() => {
+    isCleaningUpRef.current = false;
     connect();
 
     return () => {
+      // Mark that we're intentionally cleaning up
+      isCleaningUpRef.current = true;
+
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
       if (wsRef.current) {
+        wsRef.current.onclose = null; // Prevent reconnect on intentional close
         wsRef.current.close();
+        wsRef.current = null;
       }
     };
   }, [connect]);

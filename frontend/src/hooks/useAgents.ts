@@ -1,12 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useAgentStore } from '@/stores/agentStore';
 import * as api from '@/lib/api';
 
 export function useInitialData() {
   const { setAgent, setCycles, setPrompts, setOrchestratorState } = useAgentStore();
 
-  useEffect(() => {
-    // Fetch initial status
+  const fetchData = useCallback(() => {
+    // Fetch current status
     api.getStatus().then((status) => {
       setOrchestratorState(status.running, status.cycle, status.phase);
 
@@ -21,12 +21,21 @@ export function useInitialData() {
       // Set cycles
       setCycles(status.recentCycles);
     }).catch(console.error);
+  }, [setAgent, setCycles, setOrchestratorState]);
 
-    // Fetch prompts
+  useEffect(() => {
+    // Fetch initial data
+    fetchData();
+
+    // Fetch prompts (only once)
     api.listPrompts().then(({ prompts }) => {
       setPrompts(prompts);
     }).catch(console.error);
-  }, [setAgent, setCycles, setPrompts, setOrchestratorState]);
+
+    // Periodically refresh agent data (every 5 seconds as fallback, WebSocket handles real-time)
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, [fetchData, setPrompts]);
 }
 
 export function useAgentOutput(agentId: string | null) {

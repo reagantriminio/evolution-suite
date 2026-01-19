@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Calendar,
 } from 'lucide-react';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import type { UsageHistory } from '@/lib/types';
 import * as api from '@/lib/api';
 
@@ -78,8 +79,9 @@ interface UsageDashboardProps {
 export function UsageDashboard({ isVisible }: UsageDashboardProps) {
   const [usage, setUsage] = useState<UsageHistory | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState<7 | 30 | 90>(7);
+  const [timeRange, setTimeRange] = usePersistedState<7 | 30 | 90>('usage-time-range', 7);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [containerReady, setContainerReady] = useState(false);
 
   const fetchUsage = async () => {
     setIsLoading(true);
@@ -103,6 +105,12 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
     }
   }, [isVisible, timeRange]);
 
+  // Delay rendering of ResponsiveContainer until parent has computed dimensions
+  useEffect(() => {
+    const timer = setTimeout(() => setContainerReady(true), 100);
+    return () => clearTimeout(timer);
+  }, []);
+
   if (!isVisible) return null;
 
   const today = usage?.today;
@@ -120,9 +128,15 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
         (yesterdayUsage.metrics.inputTokens + yesterdayUsage.metrics.outputTokens)) * 100
     : undefined;
 
+  // Parse date as local time to avoid timezone issues
+  const parseLocalDate = (dateStr: string) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
   // Prepare chart data
   const dailyChartData = history.slice(0, timeRange).reverse().map((day) => ({
-    date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    date: parseLocalDate(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     inputTokens: day.metrics.inputTokens / 1000,
     outputTokens: day.metrics.outputTokens / 1000,
     cost: day.metrics.costUsd,
@@ -214,35 +228,37 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
         <h3 className="text-sm font-medium text-zinc-300 mb-4">Daily Usage</h3>
         <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={dailyChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-              <XAxis dataKey="date" tick={{ fill: '#71717a', fontSize: 12 }} />
-              <YAxis
-                yAxisId="left"
-                tick={{ fill: '#71717a', fontSize: 12 }}
-                label={{ value: 'Tokens (K)', angle: -90, position: 'insideLeft', fill: '#71717a' }}
-              />
-              <YAxis
-                yAxisId="right"
-                orientation="right"
-                tick={{ fill: '#71717a', fontSize: 12 }}
-                label={{ value: 'Cost ($)', angle: 90, position: 'insideRight', fill: '#71717a' }}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#18181b',
-                  border: '1px solid #27272a',
-                  borderRadius: '8px',
-                }}
-                labelStyle={{ color: '#d4d4d8' }}
-              />
-              <Legend />
-              <Bar yAxisId="left" dataKey="inputTokens" name="Input (K)" fill="#3b82f6" stackId="tokens" />
-              <Bar yAxisId="left" dataKey="outputTokens" name="Output (K)" fill="#8b5cf6" stackId="tokens" />
-              <Bar yAxisId="right" dataKey="cost" name="Cost ($)" fill="#10b981" />
-            </BarChart>
-          </ResponsiveContainer>
+          {containerReady && (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailyChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                <XAxis dataKey="date" tick={{ fill: '#71717a', fontSize: 12 }} />
+                <YAxis
+                  yAxisId="left"
+                  tick={{ fill: '#71717a', fontSize: 12 }}
+                  label={{ value: 'Tokens (K)', angle: -90, position: 'insideLeft', fill: '#71717a' }}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tick={{ fill: '#71717a', fontSize: 12 }}
+                  label={{ value: 'Cost ($)', angle: 90, position: 'insideRight', fill: '#71717a' }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#18181b',
+                    border: '1px solid #27272a',
+                    borderRadius: '8px',
+                  }}
+                  labelStyle={{ color: '#d4d4d8' }}
+                />
+                <Legend />
+                <Bar yAxisId="left" dataKey="inputTokens" name="Input (K)" fill="#3b82f6" stackId="tokens" />
+                <Bar yAxisId="left" dataKey="outputTokens" name="Output (K)" fill="#8b5cf6" stackId="tokens" />
+                <Bar yAxisId="right" dataKey="cost" name="Cost ($)" fill="#10b981" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 
@@ -252,7 +268,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
           <h3 className="text-sm font-medium text-zinc-300 mb-4">By Agent Type</h3>
           <div className="h-48">
-            {agentTypeData.length > 0 ? (
+            {containerReady && agentTypeData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -294,7 +310,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
           <h3 className="text-sm font-medium text-zinc-300 mb-4">By Model</h3>
           <div className="h-48">
-            {modelData.length > 0 ? (
+            {containerReady && modelData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -351,7 +367,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
               {history.slice(0, 7).map((day, index) => (
                 <tr key={day.date} className={index === 0 ? 'bg-blue-500/5' : ''}>
                   <td className="px-4 py-2 text-zinc-300">
-                    {new Date(day.date).toLocaleDateString('en-US', {
+                    {parseLocalDate(day.date).toLocaleDateString('en-US', {
                       weekday: 'short',
                       month: 'short',
                       day: 'numeric',

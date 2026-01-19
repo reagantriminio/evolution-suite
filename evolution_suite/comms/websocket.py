@@ -101,11 +101,25 @@ class WebSocketManager:
             })
 
     async def listen(self, websocket: WebSocket) -> None:
-        """Listen for messages from a client."""
+        """Listen for messages from a client with heartbeat support."""
         try:
             while True:
-                data = await websocket.receive_json()
-                await self.handle_message(websocket, data)
+                try:
+                    # Wait for message with timeout for heartbeat
+                    data = await asyncio.wait_for(
+                        websocket.receive_json(),
+                        timeout=30.0
+                    )
+                    # Handle pong response (client keepalive)
+                    if data.get("type") == "pong":
+                        continue
+                    await self.handle_message(websocket, data)
+                except asyncio.TimeoutError:
+                    # Send ping to keep connection alive
+                    try:
+                        await websocket.send_json({"type": "ping"})
+                    except Exception:
+                        break
         except WebSocketDisconnect:
             await self.disconnect(websocket)
         except Exception:

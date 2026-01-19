@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, forwardRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Download } from 'lucide-react';
 import { useAgentStore } from '@/stores/agentStore';
 import clsx from 'clsx';
 import type { OutputLine } from '@/lib/types';
+import { HighlightedContent } from './CodeBlock';
 
 export function OutputPanel() {
   const { agents, selectedAgentId, setSelectedAgentId, outputBuffers } = useAgentStore();
@@ -113,47 +114,50 @@ export function OutputPanel() {
   );
 }
 
-function OutputLineItem({ line }: { line: OutputLine }) {
-  const timestamp = new Date(line.timestamp).toLocaleTimeString('en-US', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+const OutputLineItem = forwardRef<HTMLDivElement, { line: OutputLine }>(
+  function OutputLineItem({ line }, ref) {
+    const timestamp = new Date(line.timestamp).toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
 
-  const getIcon = () => {
-    switch (line.type) {
-      case 'thinking':
-      case 'thinking_delta':
-        return '💭';
-      case 'tool_use':
-        return '🔧';
-      case 'error':
-        return '❌';
-      default:
-        return '';
-    }
-  };
+    const getIcon = () => {
+      switch (line.type) {
+        case 'thinking':
+        case 'thinking_delta':
+          return '💭';
+        case 'tool_use':
+          return '🔧';
+        case 'error':
+          return '❌';
+        default:
+          return '';
+      }
+    };
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.15 }}
-      className={clsx(
-        'py-0.5 leading-relaxed',
-        line.type === 'thinking' || line.type === 'thinking_delta'
-          ? 'text-zinc-500 italic'
-          : line.type === 'tool_use'
-          ? 'text-zinc-400'
-          : line.type === 'error'
-          ? 'text-red-400'
-          : 'text-zinc-300'
-      )}
-    >
-      <span className="text-zinc-600 mr-2">{timestamp}</span>
-      {getIcon() && <span className="mr-1">{getIcon()}</span>}
-      <span className="whitespace-pre-wrap break-words">{line.content}</span>
-    </motion.div>
-  );
-}
+    return (
+      <motion.div
+        ref={ref}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.15 }}
+        className={clsx(
+          'py-0.5 leading-relaxed',
+          line.type === 'thinking' || line.type === 'thinking_delta'
+            ? 'text-zinc-500 italic'
+            : line.type === 'tool_use'
+            ? 'text-zinc-400'
+            : line.type === 'error'
+            ? 'text-red-400'
+            : 'text-zinc-300'
+        )}
+      >
+        <span className="text-zinc-600 mr-2">{timestamp}</span>
+        {getIcon() && <span className="mr-1">{getIcon()}</span>}
+        <HighlightedContent content={line.content} />
+      </motion.div>
+    );
+  }
+);

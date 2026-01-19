@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useAgentStore } from '@/stores/agentStore';
 import { AgentCard } from './AgentCard';
 import * as api from '@/lib/api';
@@ -22,8 +23,10 @@ export function AgentPool() {
     try {
       const agent = await api.spawnAgent(type);
       setAgent(agent);
+      toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} agent spawned`);
     } catch (error) {
       console.error('Failed to spawn agent:', error);
+      toast.error(`Failed to spawn ${type} agent`);
     }
   };
 
@@ -47,32 +50,58 @@ export function AgentPool() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        <AnimatePresence mode="popLayout">
-          {agentTypes.flatMap((type) =>
-            agentsByType[type].map((agent) => (
-              <motion.div
-                key={agent.id}
-                layout
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
-              >
-                <AgentCard agent={agent} />
-              </motion.div>
-            ))
-          )}
-        </AnimatePresence>
+      {/* Grouped by type */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {agentTypes.map((type) => (
+          <div key={type} className="bg-zinc-900/50 rounded-lg border border-zinc-800 p-3">
+            {/* Type Header */}
+            <div className="flex items-center justify-between mb-3 pb-2 border-b border-zinc-800">
+              <h3 className={`text-sm font-medium capitalize ${
+                type === 'coordinator' ? 'text-indigo-400' :
+                type === 'worker' ? 'text-green-400' :
+                'text-amber-400'
+              }`}>
+                {type}s
+              </h3>
+              <span className="text-xs text-zinc-500">
+                {agentsByType[type].length} active
+              </span>
+            </div>
 
-        {/* Empty state */}
-        {Object.values(agents).length === 0 && (
-          <div className="col-span-full flex flex-col items-center justify-center py-12 text-zinc-500">
-            <p className="text-sm">No agents running</p>
-            <p className="text-xs mt-1">Click a button above to spawn an agent</p>
+            {/* Agent Cards */}
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              <AnimatePresence mode="popLayout">
+                {agentsByType[type].map((agent) => (
+                  <motion.div
+                    key={agent.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <AgentCard agent={agent} />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+
+              {/* Empty state for this type */}
+              {agentsByType[type].length === 0 && (
+                <div className="flex flex-col items-center justify-center py-6 text-zinc-600">
+                  <p className="text-xs">No {type}s</p>
+                </div>
+              )}
+            </div>
           </div>
-        )}
+        ))}
       </div>
+
+      {/* Global empty state */}
+      {Object.values(agents).length === 0 && (
+        <div className="text-center py-4 text-zinc-500">
+          <p className="text-sm">Click a button above to spawn an agent</p>
+        </div>
+      )}
     </div>
   );
 }

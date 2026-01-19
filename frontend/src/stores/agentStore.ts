@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { getPersistedValue, setPersistedValue } from '@/hooks/usePersistedState';
 import type { Agent, Cycle, CyclePhase, OutputLine, Prompt, WebSocketEvent } from '@/lib/types';
 
 interface AgentOutputBuffer {
@@ -104,9 +105,12 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       },
     })),
 
-  // Selected agent
-  selectedAgentId: null,
-  setSelectedAgentId: (agentId) => set({ selectedAgentId: agentId }),
+  // Selected agent - initialized from localStorage
+  selectedAgentId: getPersistedValue<string | null>('selected-agent-id', null),
+  setSelectedAgentId: (agentId) => {
+    setPersistedValue('selected-agent-id', agentId);
+    set({ selectedAgentId: agentId });
+  },
 
   // Cycles
   cycles: [],
@@ -144,7 +148,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           state.setAgent(event.agent as Agent);
           // Auto-select if first agent
           if (!state.selectedAgentId) {
-            set({ selectedAgentId: (event.agent as Agent).id });
+            state.setSelectedAgentId((event.agent as Agent).id);
           }
         }
         break;
@@ -169,7 +173,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
             const remainingIds = Object.keys(state.agents).filter(
               (id) => id !== event.agentId
             );
-            set({ selectedAgentId: remainingIds[0] || null });
+            state.setSelectedAgentId(remainingIds[0] || null);
           }
         }
         break;

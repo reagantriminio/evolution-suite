@@ -117,6 +117,20 @@ def create_router(
         )
         return AgentResponse(**agent.to_dict())
 
+    @router.post("/agents/{agent_id}/start", response_model=OrchestratorResponse)
+    async def start_agent(agent_id: str, request: GuidanceRequest):
+        """Start an agent with a prompt."""
+        try:
+            await orchestrator.agent_manager.start_agent(agent_id, request.content)
+            return OrchestratorResponse(
+                success=True,
+                message=f"Agent {agent_id} started",
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     @router.post("/agents/{agent_id}/inject", response_model=OrchestratorResponse)
     async def inject_guidance(agent_id: str, request: GuidanceRequest):
         """Inject guidance into an agent."""
