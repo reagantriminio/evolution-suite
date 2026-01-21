@@ -295,25 +295,19 @@ class Agent:
 
         try:
             # Build command arguments
+            # Put prompt right after -p to ensure it's captured as the prompt argument
             cmd_args = [
                 "claude",
                 "--verbose",
                 "--output-format", "stream-json",
-                "--dangerously-skip-permissions",  # Run fully autonomously (bypasses all permission checks)
-                "-p",  # Print mode - non-interactive, single prompt
+                "--dangerously-skip-permissions",  # Run fully autonomously
+                "-p", prompt,  # Print mode with prompt as immediate argument
             ]
 
-            # For coordinators, specify only the tools they should use
+            # For coordinators, disable Task tool so they use HTTP API instead
             if self.type == AgentType.COORDINATOR:
-                # Coordinator uses HTTP API to spawn agents, so exclude Task tool
-                cmd_args.extend([
-                    "--tools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch",
-                ])
-
-            # Use -- to separate options from the positional prompt argument
-            # This prevents --tools from consuming the prompt
-            cmd_args.append("--")
-            cmd_args.append(prompt)
+                # Use --disallowedTools to block specific tools (avoids variadic --tools issue)
+                cmd_args.extend(["--disallowedTools", "Task"])
 
             # Use asyncio subprocess for proper async handling
             self.process = await asyncio.create_subprocess_exec(
