@@ -14,8 +14,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from evolution_suite.api.routes import create_router
-from evolution_suite.browser.routes import create_browser_router
-from evolution_suite.browser.service import PlaywrightService
+from evolution_suite.browser import PLAYWRIGHT_AVAILABLE
+if PLAYWRIGHT_AVAILABLE:
+    from evolution_suite.browser.routes import create_browser_router
+    from evolution_suite.browser.service import PlaywrightService
 from evolution_suite.comms.file_channel import FileChannel
 from evolution_suite.comms.websocket import WebSocketManager
 from evolution_suite.core.config import Config, load_config
@@ -34,12 +36,14 @@ def create_app(config: Config, project_root: Path) -> FastAPI:
         on_event=ws_manager.create_event_callback(),
     )
 
-    # Initialize Playwright service for browser automation
-    playwright_service = PlaywrightService(
-        headless=config.playwright.headless,
-        screenshot_base_dir=Path(config.playwright.screenshot_dir),
-        on_event=ws_manager.create_event_callback(),
-    ) if config.playwright.enabled else None
+    # Initialize Playwright service for browser automation (if available)
+    playwright_service = None
+    if PLAYWRIGHT_AVAILABLE and config.playwright.enabled:
+        playwright_service = PlaywrightService(
+            headless=config.playwright.headless,
+            screenshot_base_dir=Path(config.playwright.screenshot_dir),
+            on_event=ws_manager.create_event_callback(),
+        )
 
     # Register WebSocket message handlers
     async def handle_inject_guidance(data: dict) -> dict:

@@ -295,23 +295,23 @@ class Agent:
 
         try:
             # Build command arguments
+            # Prompt is passed as a positional argument after all flags
             cmd_args = [
                 "claude",
-                "--dangerously-skip-permissions",
                 "--verbose",
                 "--output-format", "stream-json",
-                "--permission-mode", "bypassPermissions",  # Run fully autonomously
-                "-p",  # Print mode for non-interactive output
+                "--dangerously-skip-permissions",  # Run fully autonomously (bypasses all permission checks)
+                "-p",  # Print mode - non-interactive, single prompt
             ]
 
-            # For coordinators, disable the Task tool so they use HTTP API instead
+            # For coordinators, specify only the tools they should use
             if self.type == AgentType.COORDINATOR:
-                # Disable Task tool - coordinator should use curl to spawn real agents via HTTP API
+                # Coordinator uses HTTP API to spawn agents, so exclude Task tool
                 cmd_args.extend([
                     "--tools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch",
                 ])
 
-            # Add prompt as argument
+            # Add prompt as the last argument (not via stdin - claude CLI expects it as positional)
             cmd_args.append(prompt)
 
             # Use asyncio subprocess for proper async handling
@@ -324,8 +324,25 @@ class Agent:
 
             self._set_status(AgentStatus.RUNNING)
 
-            # Stream output
-            await self._stream_output(timeout_minutes * 60)
+            # Log the command being run for debugging
+            self._add_output(OutputLine(
+                timestamp=datetime.now(),
+                content=f"[debug] PID={self.process.pid}, cwd={self.config.project_root}",
+                line_type="text",
+            ))
+            self._add_output(OutputLine(
+                timestamp=datetime.now(),
+                content=f"[debug] Command: {' '.join(cmd_args[:8])}...",
+                line_type="text",
+            ))
+            self._add_output(OutputLine(
+                timestamp=datetime.now(),
+                content=f"[debug] Prompt length: {len(prompt)} chars",
+                line_type="text",
+            ))
+
+            # Stream output and stderr concurrently
+            await self._stream_with_stderr(timeout_minutes * 60)
 
         except Exception as e:
             self.error = str(e)
@@ -340,6 +357,47 @@ class Agent:
             self.finished_at = datetime.now()
             if self.status == AgentStatus.RUNNING:
                 self._set_status(AgentStatus.STOPPED)
+
+    async def _stream_with_stderr(self, timeout_seconds: float) -> None:
+        """Stream stdout and stderr concurrently from the subprocess."""
+        if not self.process:
+            return
+
+        async def read_stderr():
+            """Read stderr and capture errors."""
+            if not self.process or not self.process.stderr:
+                return
+            try:
+                stderr_data = await self.process.stderr.read()
+                if stderr_data:
+                    stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
+                    if stderr_text:
+                        self._add_output(OutputLine(
+                            timestamp=datetime.now(),
+                            content=f"[stderr] {stderr_text}",
+                            line_type="error",
+                        ))
+                        if not self.error:
+                            self.error = stderr_text[:500]
+            except Exception as e:
+                self._add_output(OutputLine(
+                    timestamp=datetime.now(),
+                    content=f"[stderr read error] {e}",
+                    line_type="error",
+                ))
+
+        # Start stderr reader as a background task
+        stderr_task = asyncio.create_task(read_stderr())
+
+        try:
+            # Stream stdout
+            await self._stream_output(timeout_seconds)
+        finally:
+            # Wait for stderr task to complete
+            try:
+                await asyncio.wait_for(stderr_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                stderr_task.cancel()
 
     async def _stream_output(self, timeout_seconds: float) -> None:
         """Stream output from the subprocess using chunk-based reading."""
@@ -386,6 +444,14 @@ class Agent:
                     # Process finished - handle remaining buffer
                     if buffer:
                         await self._process_output(buffer.decode("utf-8", errors="replace"))
+                    # Log exit code for debugging
+                    exit_code = self.process.returncode
+                    line_type = "error" if exit_code != 0 else "text"
+                    self._add_output(OutputLine(
+                        timestamp=datetime.now(),
+                        content=f"[debug] Process exited with code {exit_code}",
+                        line_type=line_type,
+                    ))
                     break
             except asyncio.TimeoutError:
                 # Check if process is still running
@@ -393,6 +459,14 @@ class Agent:
                     # Process remaining buffer
                     if buffer:
                         await self._process_output(buffer.decode("utf-8", errors="replace"))
+                    # Log exit code for debugging
+                    exit_code = self.process.returncode
+                    line_type = "error" if exit_code != 0 else "text"
+                    self._add_output(OutputLine(
+                        timestamp=datetime.now(),
+                        content=f"[debug] Process exited with code {exit_code}",
+                        line_type=line_type,
+                    ))
                     break
                 continue
 
