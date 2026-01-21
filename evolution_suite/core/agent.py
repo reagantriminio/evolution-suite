@@ -295,13 +295,13 @@ class Agent:
 
         try:
             # Build command arguments
-            # Prompt is passed as a positional argument after all flags
+            # Prompt is passed via stdin to avoid argument parsing issues with --tools
             cmd_args = [
                 "claude",
                 "--verbose",
                 "--output-format", "stream-json",
                 "--dangerously-skip-permissions",  # Run fully autonomously (bypasses all permission checks)
-                "-p",  # Print mode - non-interactive, single prompt
+                "-p",  # Print mode - non-interactive, reads prompt from stdin
             ]
 
             # For coordinators, specify only the tools they should use
@@ -311,16 +311,22 @@ class Agent:
                     "--tools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch",
                 ])
 
-            # Add prompt as the last argument (not via stdin - claude CLI expects it as positional)
-            cmd_args.append(prompt)
-
             # Use asyncio subprocess for proper async handling
+            # Pass prompt via stdin to avoid issues with --tools consuming positional args
             self.process = await asyncio.create_subprocess_exec(
                 *cmd_args,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.config.project_root,
             )
+
+            # Write prompt to stdin and close it
+            if self.process.stdin:
+                self.process.stdin.write(prompt.encode("utf-8"))
+                await self.process.stdin.drain()
+                self.process.stdin.close()
+                await self.process.stdin.wait_closed()
 
             self._set_status(AgentStatus.RUNNING)
 
