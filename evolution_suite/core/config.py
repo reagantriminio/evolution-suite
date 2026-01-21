@@ -58,6 +58,14 @@ class ProtectionConfig(BaseModel):
     dangerous_patterns: list[str] = Field(default_factory=list)
 
 
+class PlaywrightConfig(BaseModel):
+    """Playwright browser configuration for evaluator agents."""
+
+    enabled: bool = True
+    headless: bool = True
+    screenshot_dir: str = "/tmp/evolution-suite-screenshots"
+
+
 class Config(BaseModel):
     """Complete evolution suite configuration."""
 
@@ -67,6 +75,7 @@ class Config(BaseModel):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     protection: ProtectionConfig = Field(default_factory=ProtectionConfig)
+    playwright: PlaywrightConfig = Field(default_factory=PlaywrightConfig)
 
     # Runtime fields (not from config file)
     project_root: Path = Field(default=Path.cwd(), exclude=True)

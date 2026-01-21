@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus } from 'lucide-react';
+import { Plus, Crown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAgentStore } from '@/stores/agentStore';
 import { AgentCard } from './AgentCard';
@@ -11,13 +11,18 @@ const agentTypes: AgentType[] = ['coordinator', 'worker', 'evaluator'];
 export function AgentPool() {
   const { agents, setAgent } = useAgentStore();
 
-  const agentsByType = agentTypes.reduce(
-    (acc, type) => ({
-      ...acc,
-      [type]: Object.values(agents).filter((a) => a.type === type),
-    }),
-    {} as Record<AgentType, typeof agents[string][]>
-  );
+  // Separate master coordinator from others
+  const allCoordinators = Object.values(agents).filter((a) => a.type === 'coordinator');
+  const masterCoordinator = allCoordinators.find(
+    (a) => a.id.includes('master') || a.assignedBy === null || a.assignedBy === undefined
+  ) || allCoordinators[0];
+  const otherCoordinators = allCoordinators.filter((a) => a !== masterCoordinator);
+
+  const agentsByType = {
+    coordinator: otherCoordinators,
+    worker: Object.values(agents).filter((a) => a.type === 'worker'),
+    evaluator: Object.values(agents).filter((a) => a.type === 'evaluator'),
+  } as Record<AgentType, typeof agents[string][]>;
 
   const handleSpawnAgent = async (type: AgentType) => {
     try {
@@ -49,6 +54,29 @@ export function AgentPool() {
           ))}
         </div>
       </div>
+
+      {/* Master Coordinator Section */}
+      {masterCoordinator && (
+        <div className="bg-gradient-to-r from-pink-500/10 to-zinc-900/50 rounded-lg border-2 border-pink-500/30 p-4">
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-pink-500/20">
+            <Crown className="w-4 h-4 text-pink-400" />
+            <h3 className="text-sm font-bold text-pink-400">
+              MASTER COORDINATOR
+            </h3>
+            <span className="text-xs text-zinc-500 ml-auto">
+              {masterCoordinator.delegatedTo?.length || 0} agents spawned
+            </span>
+          </div>
+          <motion.div
+            layout
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.2 }}
+          >
+            <AgentCard agent={masterCoordinator} isMaster />
+          </motion.div>
+        </div>
+      )}
 
       {/* Grouped by type */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

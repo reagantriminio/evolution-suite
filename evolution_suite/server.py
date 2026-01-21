@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from evolution_suite.api.routes import create_router
+from evolution_suite.browser.routes import create_browser_router
+from evolution_suite.browser.service import PlaywrightService
 from evolution_suite.comms.file_channel import FileChannel
 from evolution_suite.comms.websocket import WebSocketManager
 from evolution_suite.core.config import Config, load_config
@@ -31,6 +33,13 @@ def create_app(config: Config, project_root: Path) -> FastAPI:
         project_root=project_root,
         on_event=ws_manager.create_event_callback(),
     )
+
+    # Initialize Playwright service for browser automation
+    playwright_service = PlaywrightService(
+        headless=config.playwright.headless,
+        screenshot_base_dir=Path(config.playwright.screenshot_dir),
+        on_event=ws_manager.create_event_callback(),
+    ) if config.playwright.enabled else None
 
     # Register WebSocket message handlers
     async def handle_inject_guidance(data: dict) -> dict:
@@ -62,6 +71,8 @@ def create_app(config: Config, project_root: Path) -> FastAPI:
         # Cleanup on shutdown
         await orchestrator.force_stop()
         file_channel.cleanup()
+        if playwright_service:
+            await playwright_service.shutdown()
 
     app = FastAPI(
         title="Evolution Suite",
@@ -82,6 +93,11 @@ def create_app(config: Config, project_root: Path) -> FastAPI:
     # API routes
     api_router = create_router(orchestrator, file_channel, ws_manager, config)
     app.include_router(api_router)
+
+    # Browser automation routes (if Playwright is enabled)
+    if playwright_service:
+        browser_router = create_browser_router(playwright_service)
+        app.include_router(browser_router)
 
     # WebSocket endpoint
     @app.websocket("/ws")

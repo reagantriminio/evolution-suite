@@ -1,0 +1,35 @@
+# Evolution Suite Configuration
+project:
+  name: "evolution-suite"
+  description: "Add your project description here"
+  branch: "main"
+
+# Custom prompts (optional - leave commented to use defaults)
+# prompts:
+#   coordinator: "./evolution/prompts/coordinator.md"
+#   worker: "./evolution/prompts/worker.md"
+#   evaluator: "./evolution/prompts/evaluator.md"
+
+state:
+  directory: "./evolution"
+
+agents:
+  coordinator:
+    timeout_minutes: 15
+  worker:
+    timeout_minutes: 45
+  evaluator:
+    timeout_minutes: 30
+
+server:
+  port: 8420
+  host: "127.0.0.1"
+
+protection:
+  forbidden_files:
+    - ".env"
+    - ".env.local"
+    - ".env.production"
+  dangerous_patterns:
+    - "DROP DATABASE"
+    - "DETACH DELETE"

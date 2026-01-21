@@ -14,13 +14,13 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 import {
-  DollarSign,
   Zap,
   Activity,
   TrendingUp,
   TrendingDown,
   RefreshCw,
   Calendar,
+  Hash,
 } from 'lucide-react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { UsageHistory } from '@/lib/types';
@@ -118,8 +118,8 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
 
   // Calculate trends
   const yesterdayUsage = history[1];
-  const costTrend = today && yesterdayUsage && yesterdayUsage.metrics.costUsd > 0
-    ? ((today.metrics.costUsd - yesterdayUsage.metrics.costUsd) / yesterdayUsage.metrics.costUsd) * 100
+  const requestsTrend = today && yesterdayUsage && yesterdayUsage.metrics.requests > 0
+    ? ((today.metrics.requests - yesterdayUsage.metrics.requests) / yesterdayUsage.metrics.requests) * 100
     : undefined;
 
   const tokenTrend = today && yesterdayUsage && (yesterdayUsage.metrics.inputTokens + yesterdayUsage.metrics.outputTokens) > 0
@@ -139,24 +139,24 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
     date: parseLocalDate(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     inputTokens: day.metrics.inputTokens / 1000,
     outputTokens: day.metrics.outputTokens / 1000,
-    cost: day.metrics.costUsd,
+    requests: day.metrics.requests,
   }));
 
-  // Agent type breakdown
+  // Agent type breakdown (by tokens)
   const agentTypeData = today?.byAgentType
     ? Object.entries(today.byAgentType).map(([type, metrics]) => ({
         name: type.charAt(0).toUpperCase() + type.slice(1),
-        value: metrics.costUsd,
-        tokens: metrics.inputTokens + metrics.outputTokens,
+        value: metrics.inputTokens + metrics.outputTokens,
+        requests: metrics.requests,
       }))
     : [];
 
-  // Model breakdown
+  // Model breakdown (by tokens)
   const modelData = today?.byModel
     ? Object.entries(today.byModel).map(([model, metrics]) => ({
         name: model.split('-').slice(1, 3).join('-'),
-        value: metrics.costUsd,
-        tokens: metrics.inputTokens + metrics.outputTokens,
+        value: metrics.inputTokens + metrics.outputTokens,
+        requests: metrics.requests,
       }))
     : [];
 
@@ -194,10 +194,10 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
       {/* Summary Stats */}
       <div className="grid grid-cols-4 gap-4">
         <StatCard
-          label="Today's Cost"
-          value={`$${today?.metrics.costUsd.toFixed(2) || '0.00'}`}
-          trend={costTrend}
-          icon={<DollarSign className="w-5 h-5 text-emerald-400" />}
+          label="Requests Today"
+          value={`${today?.metrics.requests || 0}`}
+          trend={requestsTrend}
+          icon={<Hash className="w-5 h-5 text-emerald-400" />}
           color="#10b981"
         />
         <StatCard
@@ -216,9 +216,9 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
           color="#3b82f6"
         />
         <StatCard
-          label="Total Spend"
-          value={`$${usage?.total.costUsd.toFixed(2) || '0.00'}`}
-          subValue={`${usage?.total.requests || 0} requests`}
+          label="Total Requests"
+          value={`${usage?.total.requests || 0}`}
+          subValue={`${((usage?.total.inputTokens || 0) / 1000000).toFixed(2)}M tokens total`}
           icon={<Calendar className="w-5 h-5 text-purple-400" />}
           color="#8b5cf6"
         />
@@ -242,7 +242,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
                   yAxisId="right"
                   orientation="right"
                   tick={{ fill: '#71717a', fontSize: 12 }}
-                  label={{ value: 'Cost ($)', angle: 90, position: 'insideRight', fill: '#71717a' }}
+                  label={{ value: 'Requests', angle: 90, position: 'insideRight', fill: '#71717a' }}
                 />
                 <Tooltip
                   contentStyle={{
@@ -255,7 +255,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
                 <Legend />
                 <Bar yAxisId="left" dataKey="inputTokens" name="Input (K)" fill="#3b82f6" stackId="tokens" />
                 <Bar yAxisId="left" dataKey="outputTokens" name="Output (K)" fill="#8b5cf6" stackId="tokens" />
-                <Bar yAxisId="right" dataKey="cost" name="Cost ($)" fill="#10b981" />
+                <Bar yAxisId="right" dataKey="requests" name="Requests" fill="#10b981" />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -289,7 +289,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value) => `$${(value as number).toFixed(4)}`}
+                    formatter={(value) => `${((value as number) / 1000).toFixed(1)}K tokens`}
                     contentStyle={{
                       backgroundColor: '#18181b',
                       border: '1px solid #27272a',
@@ -328,7 +328,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value) => `$${(value as number).toFixed(4)}`}
+                    formatter={(value) => `${((value as number) / 1000).toFixed(1)}K tokens`}
                     contentStyle={{
                       backgroundColor: '#18181b',
                       border: '1px solid #27272a',
@@ -358,7 +358,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
                 <th className="px-4 py-2 text-left text-zinc-400 font-medium">Date</th>
                 <th className="px-4 py-2 text-right text-zinc-400 font-medium">Input Tokens</th>
                 <th className="px-4 py-2 text-right text-zinc-400 font-medium">Output Tokens</th>
-                <th className="px-4 py-2 text-right text-zinc-400 font-medium">Cost</th>
+                <th className="px-4 py-2 text-right text-zinc-400 font-medium">Requests</th>
                 <th className="px-4 py-2 text-right text-zinc-400 font-medium">Cycles</th>
                 <th className="px-4 py-2 text-right text-zinc-400 font-medium">Success</th>
               </tr>
@@ -383,7 +383,7 @@ export function UsageDashboard({ isVisible }: UsageDashboardProps) {
                     {(day.metrics.outputTokens / 1000).toFixed(1)}K
                   </td>
                   <td className="px-4 py-2 text-right text-emerald-400 font-mono">
-                    ${day.metrics.costUsd.toFixed(2)}
+                    {day.metrics.requests}
                   </td>
                   <td className="px-4 py-2 text-right text-zinc-300">{day.cycles}</td>
                   <td className="px-4 py-2 text-right">

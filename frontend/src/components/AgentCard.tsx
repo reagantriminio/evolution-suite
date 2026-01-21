@@ -9,6 +9,7 @@ import clsx from 'clsx';
 
 interface AgentCardProps {
   agent: Agent;
+  isMaster?: boolean;
 }
 
 const statusColors: Record<AgentStatus, string> = {
@@ -69,7 +70,7 @@ Your previous session ended. Continue your task:
 3. Ensure all changes are properly tested`;
 };
 
-export function AgentCard({ agent }: AgentCardProps) {
+export function AgentCard({ agent, isMaster = false }: AgentCardProps) {
   const { selectedAgentId, setSelectedAgentId, outputBuffers } = useAgentStore();
   const [showInject, setShowInject] = useState(false);
   const [showStart, setShowStart] = useState(false);
@@ -173,10 +174,16 @@ export function AgentCard({ agent }: AgentCardProps) {
     <div
       className={clsx(
         'relative p-4 rounded-lg border transition-all cursor-pointer',
-        'bg-zinc-900 hover:bg-zinc-800/80',
+        isMaster
+          ? 'bg-zinc-900 hover:bg-zinc-800/80'
+          : 'bg-zinc-900 hover:bg-zinc-800/80',
         isSelected
-          ? 'border-zinc-600 ring-1 ring-zinc-600'
-          : 'border-zinc-800 hover:border-zinc-700'
+          ? isMaster
+            ? 'border-pink-500/50 ring-1 ring-pink-500/30'
+            : 'border-zinc-600 ring-1 ring-zinc-600'
+          : isMaster
+            ? 'border-pink-500/30 hover:border-pink-500/50'
+            : 'border-zinc-800 hover:border-zinc-700'
       )}
       onClick={() => setSelectedAgentId(agent.id)}
     >
@@ -184,12 +191,18 @@ export function AgentCard({ agent }: AgentCardProps) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <motion.div
-            className={clsx('w-2 h-2 rounded-full', statusColors[agent.status])}
+            className={clsx(
+              'w-2 h-2 rounded-full',
+              isMaster && isRunning ? 'bg-pink-500' : statusColors[agent.status]
+            )}
             animate={isRunning ? { scale: [1, 1.2, 1] } : {}}
             transition={{ duration: 2, repeat: Infinity }}
           />
-          <span className="font-medium text-sm uppercase tracking-wide text-zinc-300">
-            {agent.type}
+          <span className={clsx(
+            'font-medium text-sm uppercase tracking-wide',
+            isMaster ? 'text-pink-400' : 'text-zinc-300'
+          )}>
+            {isMaster ? 'MASTER' : agent.type}
           </span>
         </div>
         <span className="text-xs text-zinc-500 font-mono">

@@ -15,18 +15,20 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { motion } from 'framer-motion';
-import { FileText, Users } from 'lucide-react';
+import { FileText, Users, Crown } from 'lucide-react';
 import { useAgentStore } from '@/stores/agentStore';
 import type { Agent, AgentType, StateFile, AgentRelationship } from '@/lib/types';
 
 // Lane configuration - wider spacing for larger nodes
 const LANES = {
+  master: { x: 400, y: 40, label: 'Master Coordinator', color: '#ec4899' },
   coordinator: { x: 50, label: 'Coordinators', color: '#6366f1' },
   stateFiles: { x: 380, label: 'State Files', color: '#8b5cf6' },
   worker: { x: 580, label: 'Workers', color: '#22c55e' },
   evaluator: { x: 910, label: 'Evaluators', color: '#f59e0b' },
 };
 
+const MASTER_ROW_HEIGHT = 200;  // Space reserved for master coordinator row
 const NODE_HEIGHT = 180;  // Taller nodes to accommodate goal
 const NODE_SPACING = 30;
 
@@ -124,19 +126,89 @@ function AgentNode({ data, selected }: NodeProps) {
         <span title="Output lines">{agent.outputLines} lines</span>
       </div>
 
-      {/* Usage cost if available */}
-      {agent.usage && agent.usage.costUsd > 0 && (
-        <div className="mt-2 text-xs text-emerald-400 font-mono">
-          ${agent.usage.costUsd.toFixed(4)}
-        </div>
-      )}
-
       {/* Waiting indicator */}
       {agent.waitingFor && (
         <div className="mt-2 text-xs text-orange-400 flex items-center gap-1">
           <span className="animate-pulse">⏳ Waiting...</span>
         </div>
       )}
+    </div>
+  );
+}
+
+// Master Coordinator Node - distinct styling for the orchestrating coordinator
+function MasterCoordinatorNode({ data, selected }: NodeProps) {
+  const agent = data.agent as Agent;
+  const statusColor = STATUS_COLORS[agent.status] || '#6b7280';
+  const masterColor = '#ec4899'; // Pink for master
+
+  return (
+    <div
+      className={`
+        bg-gradient-to-br from-zinc-900 to-zinc-800 border-2 rounded-xl p-4 min-w-[320px] max-w-[400px] transition-all shadow-xl
+        ${selected ? 'ring-2 ring-pink-500/40' : ''}
+        hover:shadow-2xl
+      `}
+      style={{ borderColor: masterColor }}
+    >
+      <Handle type="source" position={Position.Bottom} className="!bg-pink-500 !w-4 !h-4" />
+
+      {/* Header with crown icon */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-pink-500/20">
+            <Crown className="w-5 h-5 text-pink-400" />
+          </div>
+          <div>
+            <div className="text-lg font-bold text-pink-400">MASTER COORDINATOR</div>
+            <div className="text-xs text-zinc-500 font-mono">{agent.id}</div>
+          </div>
+        </div>
+        <motion.div
+          className="w-4 h-4 rounded-full"
+          style={{ backgroundColor: statusColor }}
+          animate={agent.status === 'running' ? { scale: [1, 1.3, 1] } : {}}
+          transition={{ repeat: Infinity, duration: 1 }}
+        />
+      </div>
+
+      {/* Goal - prominently displayed */}
+      {agent.goal && (
+        <div
+          className="text-sm text-zinc-200 mb-3 p-3 bg-zinc-800/70 rounded-lg border-l-4"
+          style={{ borderLeftColor: masterColor }}
+          title={agent.goal}
+        >
+          <div className="text-[10px] uppercase text-zinc-500 mb-1 font-medium tracking-wide">Active Directive</div>
+          <div className="line-clamp-3 font-medium">{agent.goal}</div>
+        </div>
+      )}
+
+      {/* Status and delegations */}
+      <div className="flex items-center justify-between">
+        <span
+          className="text-sm px-3 py-1 rounded-full font-medium"
+          style={{
+            backgroundColor: statusColor + '20',
+            color: statusColor
+          }}
+        >
+          {agent.status}
+        </span>
+        {agent.delegatedTo && agent.delegatedTo.length > 0 && (
+          <span className="text-xs text-pink-400 flex items-center gap-1">
+            <Users className="w-3 h-3" />
+            {agent.delegatedTo.length} agents spawned
+          </span>
+        )}
+      </div>
+
+      {/* Stats row */}
+      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-zinc-700 text-xs text-zinc-400">
+        <span title="Tools used">{agent.toolsUsed} tools</span>
+        <span title="Files modified">{agent.filesModified.length} files</span>
+        <span title="Output lines">{agent.outputLines} lines</span>
+      </div>
     </div>
   );
 }
@@ -191,6 +263,7 @@ function LaneHeader({ label, color, count }: { label: string; color: string; cou
 // Node types for React Flow
 const nodeTypes = {
   agent: AgentNode,
+  masterCoordinator: MasterCoordinatorNode,
   stateFile: StateFileNode,
 };
 
@@ -217,27 +290,45 @@ function FlowGraph({
   const nodes = useMemo(() => {
     const result: Node[] = [];
 
-    // Agent nodes by type
+    // Separate master coordinator from other coordinators
+    // Master coordinator is identified by: having "master" in ID, being assigned_by null, or being first coordinator
+    const coordinators = agentsList.filter((a) => a.type === 'coordinator');
+    const masterCoordinator = coordinators.find(
+      (a) => a.id.includes('master') || a.assignedBy === null || a.assignedBy === undefined
+    ) || coordinators[0];
+
+    const otherCoordinators = coordinators.filter((a) => a !== masterCoordinator);
+
+    // Agent nodes by type (excluding master coordinator)
     const agentsByType: Record<AgentType, Agent[]> = {
-      coordinator: [],
-      worker: [],
-      evaluator: [],
+      coordinator: otherCoordinators,
+      worker: agentsList.filter((a) => a.type === 'worker'),
+      evaluator: agentsList.filter((a) => a.type === 'evaluator'),
     };
 
-    agentsList.forEach((agent) => {
-      agentsByType[agent.type].push(agent);
-    });
+    // Add master coordinator at the top center
+    if (masterCoordinator) {
+      result.push({
+        id: masterCoordinator.id,
+        type: 'masterCoordinator',
+        position: { x: LANES.master.x, y: LANES.master.y },
+        data: { agent: masterCoordinator },
+        selected: selectedNodes.includes(masterCoordinator.id),
+      });
+    }
 
-    // Position agents in their lanes
+    // Position agents in their lanes (offset by master row height)
+    const yOffset = masterCoordinator ? MASTER_ROW_HEIGHT : 80;
+
     Object.entries(agentsByType).forEach(([type, typeAgents]) => {
       const lane = LANES[type as keyof typeof LANES];
-      if (!lane) return;
+      if (!lane || type === 'master') return;
 
       typeAgents.forEach((agent, index) => {
         result.push({
           id: agent.id,
           type: 'agent',
-          position: { x: lane.x, y: 80 + index * (NODE_HEIGHT + NODE_SPACING) },
+          position: { x: lane.x, y: yOffset + index * (NODE_HEIGHT + NODE_SPACING) },
           data: { agent },
           selected: selectedNodes.includes(agent.id),
         });
@@ -249,7 +340,7 @@ function FlowGraph({
       result.push({
         id: `file-${file.path}`,
         type: 'stateFile',
-        position: { x: LANES.stateFiles.x, y: 80 + index * (80 + NODE_SPACING) },
+        position: { x: LANES.stateFiles.x, y: (masterCoordinator ? MASTER_ROW_HEIGHT : 80) + index * (80 + NODE_SPACING) },
         data: { file },
         selected: selectedNodes.includes(`file-${file.path}`),
       });
@@ -261,6 +352,53 @@ function FlowGraph({
   // Build edges from relationships
   const edges = useMemo(() => {
     const result: Edge[] = [];
+
+    // Find master coordinator
+    const coordinators = agentsList.filter((a) => a.type === 'coordinator');
+    const masterCoordinator = coordinators.find(
+      (a) => a.id.includes('master') || a.assignedBy === null || a.assignedBy === undefined
+    ) || coordinators[0];
+
+    // Add edges from master to its delegated agents
+    if (masterCoordinator && masterCoordinator.delegatedTo) {
+      masterCoordinator.delegatedTo.forEach((targetId, index) => {
+        result.push({
+          id: `master-delegation-${index}`,
+          source: masterCoordinator.id,
+          target: targetId,
+          animated: true,
+          style: { stroke: '#ec4899', strokeWidth: 3 },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: '#ec4899',
+          },
+          labelStyle: { fill: '#ec4899', fontSize: 10 },
+        });
+      });
+    }
+
+    // Also draw edges for agents where assignedBy matches master
+    agentsList.forEach((agent) => {
+      if (masterCoordinator && agent.assignedBy === masterCoordinator.id && agent.id !== masterCoordinator.id) {
+        // Check if edge doesn't already exist
+        const edgeExists = result.some(
+          (e) => e.source === masterCoordinator.id && e.target === agent.id
+        );
+        if (!edgeExists) {
+          result.push({
+            id: `master-assigned-${agent.id}`,
+            source: masterCoordinator.id,
+            target: agent.id,
+            animated: agent.status === 'running',
+            style: { stroke: '#ec4899', strokeWidth: 3 },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: '#ec4899',
+            },
+          });
+        }
+      }
+    });
 
     relationships.forEach((rel, index) => {
       let strokeColor = '#6b7280';
@@ -340,17 +478,39 @@ function FlowGraph({
   );
 
   // Count agents by type
-  const counts = useMemo(() => ({
-    coordinator: agentsList.filter((a) => a.type === 'coordinator').length,
-    worker: agentsList.filter((a) => a.type === 'worker').length,
-    evaluator: agentsList.filter((a) => a.type === 'evaluator').length,
-    stateFiles: stateFiles.length,
-  }), [agentsList, stateFiles]);
+  const counts = useMemo(() => {
+    const coordinators = agentsList.filter((a) => a.type === 'coordinator');
+    const masterCoordinator = coordinators.find(
+      (a) => a.id.includes('master') || a.assignedBy === null || a.assignedBy === undefined
+    ) || coordinators[0];
+    const hasMaster = masterCoordinator !== undefined;
+
+    return {
+      master: hasMaster ? 1 : 0,
+      coordinator: hasMaster ? coordinators.length - 1 : coordinators.length,
+      worker: agentsList.filter((a) => a.type === 'worker').length,
+      evaluator: agentsList.filter((a) => a.type === 'evaluator').length,
+      stateFiles: stateFiles.length,
+    };
+  }, [agentsList, stateFiles]);
 
   return (
     <div className="h-full w-full relative bg-zinc-950 rounded-lg overflow-hidden" style={{ minHeight: '400px' }}>
-      {/* Lane Headers - positioned absolutely */}
-      <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none">
+      {/* Master Coordinator Header - centered at top */}
+      {counts.master > 0 && (
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+          <div
+            className="px-4 py-2 rounded-b-lg text-sm font-bold flex items-center gap-2"
+            style={{ backgroundColor: LANES.master.color + '30', color: LANES.master.color }}
+          >
+            <Crown className="w-4 h-4" />
+            MASTER COORDINATOR
+          </div>
+        </div>
+      )}
+
+      {/* Lane Headers - positioned below master row */}
+      <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: counts.master > 0 ? MASTER_ROW_HEIGHT - 30 : 0 }}>
         <div className="absolute" style={{ left: LANES.coordinator.x + 60 }}>
           <LaneHeader label="Coordinators" color={LANES.coordinator.color} count={counts.coordinator} />
         </div>
@@ -367,11 +527,25 @@ function FlowGraph({
 
       {/* Lane Dividers */}
       <svg className="absolute inset-0 pointer-events-none z-0" width="100%" height="100%">
+        {/* Horizontal divider below master row */}
+        {counts.master > 0 && (
+          <line
+            x1={0}
+            y1={MASTER_ROW_HEIGHT - 10}
+            x2="100%"
+            y2={MASTER_ROW_HEIGHT - 10}
+            stroke="#ec4899"
+            strokeWidth="2"
+            strokeDasharray="8 4"
+            opacity="0.3"
+          />
+        )}
+        {/* Vertical lane dividers */}
         {[LANES.stateFiles.x - 30, LANES.worker.x - 30, LANES.evaluator.x - 30].map((x, i) => (
           <line
             key={i}
             x1={x}
-            y1={0}
+            y1={counts.master > 0 ? MASTER_ROW_HEIGHT - 10 : 0}
             x2={x}
             y2="100%"
             stroke="#27272a"
@@ -425,6 +599,10 @@ function FlowGraph({
       <div className="absolute bottom-4 left-4 bg-zinc-900/90 border border-zinc-700 rounded-lg p-3 text-xs z-10">
         <div className="font-medium text-zinc-300 mb-2">Edge Types</div>
         <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-1 bg-pink-500 rounded" />
+            <span className="text-zinc-400">Master Spawned</span>
+          </div>
           <div className="flex items-center gap-2">
             <div className="w-4 h-0.5 bg-blue-500" />
             <span className="text-zinc-400">Delegation</span>
