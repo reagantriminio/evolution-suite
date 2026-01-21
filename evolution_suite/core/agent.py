@@ -309,6 +309,19 @@ class Agent:
                 # Use --disallowedTools to block specific tools (avoids variadic --tools issue)
                 cmd_args.extend(["--disallowedTools", "Task"])
 
+            # For evaluators, configure Playwright MCP in headless + isolated mode
+            if self.type == AgentType.EVALUATOR:
+                # MCP config for headless Playwright - prevents window focus conflicts
+                mcp_config = json.dumps({
+                    "mcpServers": {
+                        "playwright": {
+                            "command": "npx",
+                            "args": ["@playwright/mcp@latest", "--headless", "--isolated"]
+                        }
+                    }
+                })
+                cmd_args.extend(["--mcp-config", mcp_config, "--strict-mcp-config"])
+
             # Use asyncio subprocess for proper async handling
             self.process = await asyncio.create_subprocess_exec(
                 *cmd_args,
