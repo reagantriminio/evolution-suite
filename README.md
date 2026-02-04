@@ -12,8 +12,47 @@ RTS-style command center for autonomous AI agent pools that evolve codebases.
 
 ## Installation
 
+### From GitHub (recommended)
+
+```bash
+# Install latest from main branch
+pip install git+https://github.com/reagantriminio/evolution-suite.git
+
+# Install a specific version/tag
+pip install git+https://github.com/reagantriminio/evolution-suite.git@v0.1.0
+
+# Install with browser automation support
+pip install "evolution-suite[browser] @ git+https://github.com/reagantriminio/evolution-suite.git"
+```
+
+### Add to your project's dependencies
+
+**pyproject.toml:**
+```toml
+[project]
+dependencies = [
+    "evolution-suite @ git+https://github.com/reagantriminio/evolution-suite.git",
+]
+
+# Or with extras
+[project.optional-dependencies]
+agents = [
+    "evolution-suite[browser] @ git+https://github.com/reagantriminio/evolution-suite.git",
+]
+```
+
+**requirements.txt:**
+```
+evolution-suite @ git+https://github.com/reagantriminio/evolution-suite.git
+```
+
+### From PyPI (when published)
+
 ```bash
 pip install evolution-suite
+
+# With browser automation
+pip install evolution-suite[browser]
 ```
 
 ## Quick Start
@@ -93,6 +132,31 @@ npm run dev
 
 # Build for production
 npm run build
+```
+
+## Programmatic Usage
+
+You can import and use evolution-suite components in your own code:
+
+```python
+from evolution_suite.core import (
+    Agent, AgentStatus, AgentType,
+    AgentManager,
+    Config, load_config,
+    Orchestrator,
+)
+from evolution_suite.comms import FileChannel, WebSocketManager
+from evolution_suite.api import create_router
+
+# Load config from evolution.yaml
+config = load_config()
+
+# Create an agent manager
+manager = AgentManager(config)
+
+# Spawn agents programmatically
+coordinator = await manager.spawn_agent(AgentType.COORDINATOR)
+worker = await manager.spawn_agent(AgentType.WORKER)
 ```
 
 ## Architecture
